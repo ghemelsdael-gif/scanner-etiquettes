@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contrôle Automatique Poka-Yoke Ultra-Fiable</title>
-    <!-- Chargement de Tesseract.js -->
+    <!-- Chargement de ZXing (Scanner Code-Barres Pro) et Tesseract (OCR) -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -37,7 +38,7 @@
             top: 5%;
             left: 5%;
             width: 90%;
-            height: 18%;
+            height: 25%;
             border: 3px dashed #ff3333;
             border-radius: 8px;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
@@ -66,7 +67,6 @@
             transition: background 0.2s;
         }
 
-        /* Bouton fixe en bas */
         #capture-btn {
             position: fixed;
             bottom: 15px;
@@ -114,7 +114,6 @@
         .warning { background-color: #fff3cd; color: #856404; border: 2px solid #ffeeba; }
         .error { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
         
-        /* Historique */
         #history-container {
             margin-top: 25px;
             max-width: 500px;
@@ -162,7 +161,7 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Cadrez les deux étiquettes clairement sous un bon éclairage</p>
+    <p class="subtitle">Scanner ZXing + OCR dynamique</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -171,7 +170,7 @@
 
     <button id="capture-btn">📷 Analyser l'Étiquette</button>
     
-    <div id="status">Initialisation de la caméra Full HD...</div>
+    <div id="status">Initialisation du scanner...</div>
 
     <div id="result-box">
         <h3 id="result-title"></h3>
@@ -201,7 +200,6 @@
         </div>
     </div>
 
-    <!-- Canvas cachés pour le traitement -->
     <canvas id="canvas-full" style="display:none;"></canvas>
     <canvas id="canvas-cropped" style="display:none;"></canvas>
 
@@ -221,75 +219,73 @@
 
         let dernierControle = null;
         let listeControles = [];
+        let codeReader = null;
 
-        // Caméra configurée en Haute Résolution (Full HD si disponible)
-        navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: "environment",
-                width: { ideal: 1920 },
-                height: { ideal: 1080 },
-                focusMode: { ideal: "continuous" }
-            } 
-        })
-        .then(stream => { 
-            video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Placez les étiquettes sous l'objectif."; 
-        })
-        .catch(err => { 
-            statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra."; 
+        // Initialisation de la caméra et de ZXing
+        window.addEventListener('load', () => {
+            codeReader = new ZXing.BrowserMultiFormatReader();
+            
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                } 
+            })
+            .then(stream => { 
+                video.srcObject = stream; 
+                statusDiv.innerText = "Prêt. Placez le code-barres dans le cadre."; 
+            })
+            .catch(err => { 
+                statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra."; 
+            });
         });
 
-        // FILTRE MAGIQUE : Traitement d'image pour booster l'OCR (Seuillage Noir & Blanc)
+        // Décodeur ZXing haute précision depuis Canvas
+        async function decoderCodeBarresZXing(canvasSource) {
+            try {
+                const result = await codeReader.decodeFromCanvas(canvasSource);
+                if (result) {
+                    return result.getText();
+                }
+            } catch (err) {
+                // ZXing lève une exception s'il ne trouve pas de code-barres
+            }
+            return null;
+        }
+
+        // Filtre de contraste pour aider l'OCR
         function optimiserImagePourOCR(canvas) {
             const ctx = canvas.getContext('2d');
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const data = imageData.data;
-
-            // Transformation en niveaux de gris + augmentation poussée du contraste
             for (let i = 0; i < data.length; i += 4) {
                 const gris = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                // Binarisation (Noir ou Blanc pur)
                 const v = (gris > 120) ? 255 : 0; 
-                data[i] = v;     // R
-                data[i + 1] = v; // G
-                data[i + 2] = v; // B
+                data[i] = v;
+                data[i + 1] = v;
+                data[i + 2] = v;
             }
             ctx.putImageData(imageData, 0, 0);
-        }
-
-        // Lecture code-barres native
-        async function decoderCodeBarres(canvasSource) {
-            if ('BarcodeDetector' in window) {
-                try {
-                    const barcodeDetector = new BarcodeDetector({ 
-                        formats: ['code_128', 'code_39', 'qr_code', 'ean_13', 'data_matrix'] 
-                    });
-                    const barcodes = await barcodeDetector.detect(canvasSource);
-                    if (barcodes.length > 0) {
-                        return barcodes.map(b => b.rawValue).join(' ');
-                    }
-                } catch (e) {}
-            }
-            return null;
         }
 
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Traitement HD et analyse en cours...";
+            statusDiv.innerText = "Analyse du code-barres et du texte...";
 
-            // 1. Capture globale Full HD
+            // 1. Capture Full HD
             canvasFull.width = video.videoWidth;
             canvasFull.height = video.videoHeight;
             const ctxFull = canvasFull.getContext('2d');
             ctxFull.drawImage(video, 0, 0, canvasFull.width, canvasFull.height);
 
-            // 2. Découpage zone ciblée
+            // 2. Découpage bande ciblée
             const cropX = canvasFull.width * 0.05;
             const cropY = canvasFull.height * 0.05;
             const cropWidth = canvasFull.width * 0.90;
-            const cropHeight = canvasFull.height * 0.18;
+            const cropHeight = canvasFull.height * 0.25;
 
             canvasCropped.width = cropWidth;
             canvasCropped.height = cropHeight;
@@ -301,101 +297,91 @@
             );
 
             try {
-                // ÉTAPE 1 : Scan immédiat des code-barres avant traitement
-                let texteCodeBarres = await decoderCodeBarres(canvasCropped) || await decoderCodeBarres(canvasFull);
+                // TENTATIVE 1 : Scan ZXing sur la zone ciblée puis globale
+                let codeBarresLu = await decoderCodeBarresZXing(canvasCropped) || await decoderCodeBarresZXing(canvasFull);
 
-                // ÉTAPE 2 : Application du filtre Noir & Blanc à haut contraste
+                // TENTATIVE 2 : OCR
                 optimiserImagePourOCR(canvasCropped);
                 optimiserImagePourOCR(canvasFull);
 
-                // ÉTAPE 3 : Passage Tesseract optimisé
                 const worker = await Tesseract.createWorker(['fra', 'eng']);
                 
-                // Restreint le jeu de caractères pour la bande ciblée (Gagne en précision)
                 await worker.setParameters({
                     tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-',
                 });
-
                 const { data: { text: texteCadre } } = await worker.recognize(canvasCropped);
                 
-                // Réinitialise pour l'image globale
                 await worker.setParameters({ tessedit_char_whitelist: '' });
                 const { data: { text: texteGlobal } } = await worker.recognize(canvasFull);
 
                 await worker.terminate();
 
-                rawTextPre.innerText = "--- CODE-BARRES ---\n" + (texteCodeBarres || "Non détecté") +
-                                       "\n\n--- TEXTE CADRE (Traitement B&W) ---\n" + texteCadre + 
-                                       "\n\n--- TEXTE GLOBAL (Traitement B&W) ---\n" + texteGlobal;
+                rawTextPre.innerText = "--- CODE-BARRES SCANNER (ZXing) ---\n" + (codeBarresLu || "Aucun code-barres détecté") +
+                                       "\n\n--- TEXTE CADRE (OCR) ---\n" + texteCadre + 
+                                       "\n\n--- TEXTE GLOBAL (OCR) ---\n" + texteGlobal;
 
-                analyserDoubleZone(texteGlobal, texteCadre, texteCodeBarres);
+                analyserDoubleZone(texteGlobal, texteCadre, codeBarresLu);
             } catch (error) {
-                statusDiv.innerText = "Erreur technique lors de l'analyse.";
+                statusDiv.innerText = "Erreur lors de l'analyse.";
                 captureBtn.disabled = false;
             }
         });
 
-        function analyserDoubleZone(texteGlobal, texteCadre, texteCodeBarres) {
+        function analyserDoubleZone(texteGlobal, texteCadre, codeBarresLu) {
             statusDiv.innerText = "Analyse terminée.";
             captureBtn.disabled = false;
 
-            // Nettoyage des textes
             let globalFormate = texteGlobal.toUpperCase().replace(/\s+/g, '');
             let cadreFormate = texteCadre.toUpperCase().replace(/\s+/g, '');
-            let codeBarresFormate = texteCodeBarres ? texteCodeBarres.toUpperCase().trim() : "";
+            let cbFormate = codeBarresLu ? codeBarresLu.toUpperCase().trim() : "";
 
-            // 1. Recherche du Numéro T (Regex flexible)
+            // 1. Détection du N° T
             const regexNumeroT = /T\d{6,11}/g;
-            let numeroTMatches = codeBarresFormate.match(regexNumeroT) || 
+            let numeroTMatches = cbFormate.match(regexNumeroT) || 
                                  cadreFormate.match(regexNumeroT) || 
                                  globalFormate.match(regexNumeroT);
             
             let numeroT = "INCONNU";
             if (numeroTMatches) {
                 numeroT = numeroTMatches[0];
-            } else if (codeBarresFormate.length > 0) {
-                numeroT = codeBarresFormate.split(' ')[0];
+            } else if (cbFormate.length > 0) {
+                numeroT = cbFormate; // Si le code-barres contient directement la valeur
             }
 
-            // 2. Recherche tolérante des codes produits
-            const contient19 = globalFormate.includes("19MB4") || globalFormate.includes("19MB") || cadreFormate.includes("19MB");
-            const contient23 = globalFormate.includes("23MB4") || globalFormate.includes("23MB") || cadreFormate.includes("23MB");
+            // 2. Détection des codes produit
+            const contient19 = globalFormate.includes("19MB4") || globalFormate.includes("19MB") || cadreFormate.includes("19MB") || cbFormate.includes("19MB");
+            const contient23 = globalFormate.includes("23MB4") || globalFormate.includes("23MB") || cadreFormate.includes("23MB") || cbFormate.includes("23MB");
 
             let typeResultat = "ERROR";
             let titre = "";
             let message = "";
             let codeFinal = "NON IDENTIFIÉ";
 
-            // 3. Logique Poka-Yoke Sécurisée
+            // 3. Logique Poka-Yoke
             if (contient19 && contient23) {
-                // CONFLIT GRAVE
                 typeResultat = "ERROR";
                 codeFinal = "CONFLIT (19/23)";
                 titre = `❌ ERREUR DE CONFORMITÉ`;
-                message = `ALERTE : Les deux codes (19MB4 et 23MB4) ont été lus en même temps !`;
+                message = `ALERTE : 19MB4 et 23MB4 ont été détectés en même temps !`;
             } 
             else if (contient19 || contient23) {
                 codeFinal = contient23 ? "23MB4" : "19MB4";
                 
-                // Si on a le numéro T ET le code produit -> VALIDATION TOTALE
                 if (numeroT !== "INCONNU") {
                     typeResultat = "SUCCESS";
                     titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
-                    message = `Code Produit : ${codeFinal} | Numéro de Suivi validé.`;
-                } 
-                // Si le code produit est lu MAIS PAS le numéro T -> ALERTE ORANGE
-                else {
+                    message = `Code Produit : ${codeFinal} | Numéro de suivi validé par le scanner.`;
+                } else {
                     typeResultat = "WARNING";
                     titre = `⚠️ LECTURE PARTIELLE (Code: ${codeFinal})`;
-                    message = `Code ${codeFinal} trouvé, mais le N° de Suivi T est illisible. Merci de recentrer la bande rouge sur l'étiquette blanche.`;
+                    message = `Code ${codeFinal} validé, mais le N° T est illisible. Alignez bien le code-barres.`;
                 }
             } 
             else {
-                // AUCUN CODE PRODUIT TROUVÉ
                 typeResultat = "ERROR";
                 codeFinal = "ILLISIBLE";
-                titre = `🔍 LECTURE IMPOSSIBLE`;
-                message = `Aucun code produit (19MB4 / 23MB4) n'a été détecté. Rapprochez la caméra et assurez-vous d'avoir assez de lumière.`;
+                titre = `🔍 ÉCHEC DE LECTURE`;
+                message = `Aucun code (19MB4 / 23MB4) n'a pu être lu. Vérifiez les reflets.`;
             }
 
             afficherResultat(typeResultat, titre, message);
