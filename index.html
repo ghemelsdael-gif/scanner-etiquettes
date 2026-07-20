@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contrôle Automatique Poka-Yoke</title>
+    <!-- Chargement de Tesseract.js -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -34,7 +36,7 @@
             top: 10%;
             left: 5%;
             width: 90%;
-            height: 35%;
+            height: 40%;
             border: 3px dashed #ff3333;
             border-radius: 8px;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
@@ -44,7 +46,7 @@
             justify-content: center;
         }
         #scan-region-guide::after {
-            content: "Cadrez le code-barres / l'étiquette ici";
+            content: "Cadrez l'étiquette blanche (Haut) ICI";
             color: #fff;
             background: rgba(255, 51, 51, 0.9);
             font-size: 0.75rem;
@@ -107,7 +109,7 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Analyse instantanée dynamique</p>
+    <p class="subtitle">Analyse OCR - Remise à zéro à chaque clic</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -115,14 +117,14 @@
     </div>
 
     <button id="capture-btn">📷 Analyser l'Étiquette</button>
-    <div id="status">Initialisation...</div>
+    <div id="status">Initialisation de la caméra...</div>
 
     <div id="result-box">
         <h3 id="result-title"></h3>
         <p id="result-desc"></p>
         <button id="btn-save">💾 Valider & Enregistrer ce contrôle</button>
         <details style="margin-top:10px; font-size:0.8rem; color:#666;">
-            <summary>Voir les données lues lors du dernier scan</summary>
+            <summary>Voir le texte extrait du dernier scan</summary>
             <pre id="raw-text" style="white-space: pre-wrap; background: #eee; padding: 5px; max-height:150px; overflow-y:auto;"></pre>
         </details>
     </div>
@@ -138,7 +140,7 @@
         </div>
     </div>
 
-    <canvas id="canvas-temp" style="display:none;"></canvas>
+    <canvas id="canvas-resized" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video');
@@ -149,109 +151,141 @@
         const resultTitle = document.getElementById('result-title');
         const resultDesc = document.getElementById('result-desc');
         const rawTextPre = document.getElementById('raw-text');
-        const canvasTemp = document.getElementById('canvas-temp');
+        const canvasResized = document.getElementById('canvas-resized');
 
         let dernierControle = null;
         let listeControles = [];
 
-        // Accès Caméra
+        // Démarrage de la caméra
         navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment" } 
+            video: { 
+                facingMode: "environment",
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            } 
         })
         .then(stream => { 
             video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Placez la nouvelle étiquette sous l'objectif."; 
+            statusDiv.innerText = "Prêt. Placez l'étiquette sous l'objectif."; 
         })
         .catch(err => { 
-            statusDiv.innerText = "Erreur : Accès caméra refusé."; 
+            statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra."; 
         });
 
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
-            
-            // 1. Remise à zéro complète de l'interface et des variables
+
+            // --- REMISE À ZÉRO COMPLÈTE À CHAQUE CLIC ---
             resultBox.style.display = "none";
             btnSave.style.display = "none";
             dernierControle = null;
             rawTextPre.innerText = "";
-            statusDiv.innerText = "Analyse en cours du nouveau cliché...";
+            statusDiv.innerText = "Capture de l'image...";
 
-            // 2. Capture de la nouvelle image vidéo
-            canvasTemp.width = video.videoWidth || 640;
-            canvasTemp.height = video.videoHeight || 480;
-            const ctx = canvasTemp.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvasTemp.width, canvasTemp.height);
+            // Redimensionnement optimisé de la nouvelle image
+            const maxDimension = 1280;
+            let targetWidth = video.videoWidth || 1280;
+            let targetHeight = video.videoHeight || 720;
 
-            let codeBarresTrouves = [];
-
-            // 3. Détection native par le téléphone
-            if ('BarcodeDetector' in window) {
-                try {
-                    const detector = new BarcodeDetector();
-                    const barcodes = await detector.detect(canvasTemp);
-                    barcodes.forEach(b => codeBarresTrouves.push(b.rawValue));
-                } catch (e) {
-                    console.log("BarcodeDetector non supporté ou erreur", e);
+            if (targetWidth > maxDimension || targetHeight > maxDimension) {
+                if (targetWidth > targetHeight) {
+                    targetHeight = Math.round((targetHeight * maxDimension) / targetWidth);
+                    targetWidth = maxDimension;
+                } else {
+                    targetWidth = Math.round((targetWidth * maxDimension) / targetHeight);
+                    targetHeight = maxDimension;
                 }
             }
 
-            let texteBrut = codeBarresTrouves.join(" ");
-            rawTextPre.innerText = texteBrut || "Aucun code-barres détecté sur ce scan.";
+            canvasResized.width = targetWidth;
+            canvasResized.height = targetHeight;
+            const ctx = canvasResized.getContext('2d');
+            ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
 
-            analyserDonnees(texteBrut);
+            statusDiv.innerText = "Analyse OCR du nouveau cliché...";
+
+            try {
+                // Passage OCR Tesseract sur l'image fraîchement capturée
+                const result = await Tesseract.recognize(
+                    canvasResized,
+                    'eng',
+                    {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                statusDiv.innerText = `Lecture : ${Math.round(m.progress * 100)}%`;
+                            }
+                        }
+                    }
+                );
+
+                const texteBrut = result.data.text;
+                rawTextPre.innerText = texteBrut;
+                analyserContenu(texteBrut);
+
+            } catch (error) {
+                console.error("Erreur OCR :", error);
+                statusDiv.innerText = "❌ Erreur de lecture. Vérifiez votre connexion et réessayez.";
+                captureBtn.disabled = false;
+            }
         });
 
-        function analyserDonnees(texteLu) {
+        function analyserContenu(texteBrut) {
             statusDiv.innerText = "Analyse terminée.";
             captureBtn.disabled = false;
 
-            let texteUpper = texteLu.toUpperCase();
+            let texteFormate = texteBrut.toUpperCase();
 
-            // 1. Recherche dynamique du N° T sur ce scan précis
-            const matchT = texteUpper.match(/T\d{7,10}/);
-            let numeroT = matchT ? matchT[0] : "INCONNU";
+            // 1. Recherche dynamique du N° T sur cette capture précise
+            const regexT = /T\s*?\d{7,10}/g;
+            let matchT = texteFormate.match(regexT);
 
-            // 2. Recherche du code produit sur ce scan précis
-            const contient19 = texteUpper.includes("19MB");
-            const contient23 = texteUpper.includes("23MB");
+            let numeroT = "INCONNU";
+            if (matchT) {
+                numeroT = matchT[0].replace(/\s+/g, '');
+            }
+
+            // 2. Recherche dynamique du Code Produit
+            const contient19 = texteFormate.includes("19MB4") || texteFormate.includes("19MB");
+            const contient23 = texteFormate.includes("23MB4") || texteFormate.includes("23MB");
 
             let typeResultat = "ERROR";
             let titre = "";
             let message = "";
-            let codeProduitDetecte = "NON IDENTIFIÉ";
+            let codeFinal = "NON IDENTIFIÉ";
 
+            // LOGIQUE POKA-YOKE
             if (contient19 && contient23) {
                 typeResultat = "ERROR";
-                codeProduitDetecte = "CONFLIT (19/23)";
+                codeFinal = "CONFLIT (19/23)";
                 titre = `❌ ERREUR DE CONFORMITÉ`;
-                message = `ALERTE : Incohérence détectée entre 19MB4 et 23MB4 !`;
+                message = `ALERTE : Incohérence ! Présence simultanée de 19MB4 et 23MB4 sur l'image.`;
             } 
             else if (contient19 || contient23) {
-                codeProduitDetecte = contient23 ? "23MB4" : "19MB4";
+                codeFinal = contient23 ? "23MB4" : "19MB4";
+                
                 if (numeroT !== "INCONNU") {
                     typeResultat = "SUCCESS";
                     titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
-                    message = `Bobine validée pour le code ${codeProduitDetecte}.`;
+                    message = `Code ${codeFinal} validé. Numéro de suivi ${numeroT} lu avec succès.`;
                 } else {
                     typeResultat = "WARNING";
-                    titre = `⚠️ LECTURE PARTIELLE (Code: ${codeProduitDetecte})`;
-                    message = `Code ${codeProduitDetecte} détecté, mais le numéro de suivi T est illisible. Recommencez le scan.`;
+                    titre = `⚠️ LECTURE PARTIELLE (Code: ${codeFinal})`;
+                    message = `Code ${codeFinal} détecté, mais le numéro T n'a pas pu être lu. Reculez légèrement le téléphone.`;
                 }
             } 
             else {
-                typeResultat = "WARNING";
-                codeProduitDetecte = "23MB4"; // Par défaut si la détection visuelle échoue mais qu'il n'y a pas d'incohérence
-                titre = `⚠️ NOUVEAU SCAN EFFECTUÉ`;
-                message = `Aucune étiquette contradictoire détectée sur cette pièce. Suivi : ${numeroT}`;
+                typeResultat = "ERROR";
+                codeFinal = "ILLISIBLE";
+                titre = `🔍 ÉCHEC DE LECTURE`;
+                message = `Aucun code (23MB / 19MB) n'a été détecté. Assurez-vous d'avoir assez de lumière.`;
             }
 
             afficherResultat(typeResultat, titre, message);
 
-            // Création de l'objet dynamique spécifique à cette pièce
             dernierControle = {
                 date: new Date().toLocaleTimeString('fr-FR'),
                 suivi: numeroT,
-                code: codeProduitDetecte,
+                code: codeFinal,
                 statut: typeResultat === "SUCCESS" ? "CONFORME" : (typeResultat === "WARNING" ? "PARTIEL" : "ERREUR")
             };
             
@@ -291,7 +325,7 @@
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = url;
+            link.href = URL.createObjectURL(blob);
             link.download = `historique_scans_${new Date().toISOString().slice(0,10)}.csv`;
             link.click();
         });
