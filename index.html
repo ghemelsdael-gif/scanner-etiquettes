@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contrôle Automatique Poka-Yoke</title>
+    <!-- Chargement de Tesseract.js -->
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -30,7 +31,6 @@
         }
         video { width: 100%; display: block; }
         
-        /* Zone de cadrage */
         #scan-region-guide {
             position: absolute;
             top: 10%;
@@ -109,7 +109,7 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Analyse OCR haute netteté</p>
+    <p class="subtitle">Analyse OCR optimisée</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -117,7 +117,7 @@
     </div>
 
     <button id="capture-btn">📷 Analyser l'Étiquette</button>
-    <div id="status">Initialisation...</div>
+    <div id="status">Initialisation de la caméra...</div>
 
     <div id="result-box">
         <h3 id="result-title"></h3>
@@ -140,7 +140,7 @@
         </div>
     </div>
 
-    <canvas id="canvas-full" style="display:none;"></canvas>
+    <canvas id="canvas-resized" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video');
@@ -149,22 +149,22 @@
         const statusDiv = document.getElementById('status');
         const resultBox = document.getElementById('result-box');
         const rawTextPre = document.getElementById('raw-text');
-        const canvasFull = document.getElementById('canvas-full');
+        const canvasResized = document.getElementById('canvas-resized');
 
         let dernierControle = null;
         let listeControles = [];
 
-        // Démarrage vidéo avec demande d'une résolution maximale
+        // Initialisation Caméra
         navigator.mediaDevices.getUserMedia({ 
             video: { 
                 facingMode: "environment",
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
             } 
         })
         .then(stream => { 
             video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Tenez le téléphone stable à ~25-30 cm."; 
+            statusDiv.innerText = "Prêt. Placez l'étiquette sous l'objectif."; 
         })
         .catch(err => { 
             statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra."; 
@@ -174,26 +174,51 @@
             captureBtn.disabled = true;
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Analyse OCR du texte en cours...";
+            statusDiv.innerText = "Capture et optimisation de l'image...";
 
-            // Photo nette
-            canvasFull.width = video.videoWidth;
-            canvasFull.height = video.videoHeight;
-            const ctxFull = canvasFull.getContext('2d');
-            ctxFull.drawImage(video, 0, 0, canvasFull.width, canvasFull.height);
+            // Redimensionne l'image capturée (Max 1280px) pour économiser la mémoire du téléphone
+            const maxDimension = 1280;
+            let targetWidth = video.videoWidth || 1280;
+            let targetHeight = video.videoHeight || 720;
+
+            if (targetWidth > maxDimension || targetHeight > maxDimension) {
+                if (targetWidth > targetHeight) {
+                    targetHeight = Math.round((targetHeight * maxDimension) / targetWidth);
+                    targetWidth = maxDimension;
+                } else {
+                    targetWidth = Math.round((targetWidth * maxDimension) / targetHeight);
+                    targetHeight = maxDimension;
+                }
+            }
+
+            canvasResized.width = targetWidth;
+            canvasResized.height = targetHeight;
+            const ctx = canvasResized.getContext('2d');
+            ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+            statusDiv.innerText = "Analyse OCR en cours...";
 
             try {
-                // OCR Tesseract
-                const worker = await Tesseract.createWorker(['fra', 'eng']);
-                
-                const { data: { text: texteBrut } } = await worker.recognize(canvasFull);
-                await worker.terminate();
+                // Utilisation d'une instance Tesseract directe sans worker complexe
+                const result = await Tesseract.recognize(
+                    canvasResized,
+                    'eng', // Anglais est plus rapide et suffisant pour les caractères alphanumériques (T..., 23MB4)
+                    {
+                        logger: m => {
+                            if (m.status === 'recognizing text') {
+                                statusDiv.innerText = `Lecture en cours : ${Math.round(m.progress * 100)}%`;
+                            }
+                        }
+                    }
+                );
 
+                const texteBrut = result.data.text;
                 rawTextPre.innerText = texteBrut;
-
                 analyserContenu(texteBrut);
+
             } catch (error) {
-                statusDiv.innerText = "Erreur lors de la lecture OCR.";
+                console.error("Erreur OCR :", error);
+                statusDiv.innerText = "❌ Erreur de réseau ou de mémoire. Vérifiez votre connexion 4G/Wi-Fi.";
                 captureBtn.disabled = false;
             }
         });
@@ -202,17 +227,15 @@
             statusDiv.innerText = "Analyse terminée.";
             captureBtn.disabled = false;
 
-            // Nettoyage du texte : remplace les erreurs courantes de Tesseract (ex: '7' ou '1' pris pour 'T')
             let texteFormate = texteBrut.toUpperCase();
 
-            // 1. Recherche du N° de suivi 'T' (ex: T487536101)
-            // Accepte T suivi de 7 à 10 chiffres, ou corrige si le T a été mal lu (ex: "T 487536101")
+            // 1. Recherche du N° T (ex: T487536101)
             const regexT = /T\s*?\d{7,10}/g;
             let matchT = texteFormate.match(regexT);
 
             let numeroT = "INCONNU";
             if (matchT) {
-                numeroT = matchT[0].replace(/\s+/g, ''); // Retire les espaces accidentels
+                numeroT = matchT[0].replace(/\s+/g, '');
             }
 
             // 2. Recherche du Code Produit (23MB4 / 19MB4)
@@ -224,7 +247,6 @@
             let message = "";
             let codeFinal = "NON IDENTIFIÉ";
 
-            // LOGIQUE POKA-YOKE
             if (contient19 && contient23) {
                 typeResultat = "ERROR";
                 codeFinal = "CONFLIT (19/23)";
@@ -237,18 +259,18 @@
                 if (numeroT !== "INCONNU") {
                     typeResultat = "SUCCESS";
                     titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
-                    message = `Code ${codeFinal} validé sans conflit. Numéro de suivi ${numeroT} extrait avec succès.`;
+                    message = `Code ${codeFinal} validé. Numéro de suivi ${numeroT} lu avec succès.`;
                 } else {
                     typeResultat = "WARNING";
                     titre = `⚠️ LECTURE PARTIELLE (Code: ${codeFinal})`;
-                    message = `Code ${codeFinal} détecté, mais le numéro de suivi T est mal lisible. Cadrez bien la partie blanche en haut.`;
+                    message = `Code ${codeFinal} détecté, mais le numéro T n'a pas pu être lu. Reculez légèrement la caméra.`;
                 }
             } 
             else {
                 typeResultat = "ERROR";
                 codeFinal = "ILLISIBLE";
                 titre = `🔍 ÉCHEC DE LECTURE`;
-                message = `Aucun code (23MB / 19MB) n'a pu être lu. Assurez-vous d'avoir assez de lumière et pas de reflet.`;
+                message = `Aucun code (23MB / 19MB) n'a été détecté. Assurez-vous d'avoir assez de lumière.`;
             }
 
             afficherResultat(typeResultat, titre, message);
@@ -292,6 +314,7 @@
             let csvContent = "\uFEFFHeure;Numero Suivi T;Code Produit;Statut\n";
             listeControles.forEach(c => { csvContent += `${c.date};${c.suivi};${c.code};${c.statut}\n`; });
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
             link.download = `historique_scans_${new Date().toISOString().slice(0,10)}.csv`;
