@@ -15,7 +15,7 @@
             text-align: center;
         }
         h1 { color: #333; font-size: 1.4rem; margin-bottom: 5px; }
-        p.subtitle { color: #666; font-size: 0.9rem; margin-top: 0; margin-bottom: 15px; }
+        p.subtitle { color: #666; font-size: 0.85rem; margin-top: 0; margin-bottom: 15px; }
         
         #video-container {
             position: relative;
@@ -30,6 +30,31 @@
         }
         video { width: 100%; display: block; }
         
+        /* Cadre de visée pour limiter la zone d'analyse */
+        #scan-region-guide {
+            position: absolute;
+            top: 15%;
+            left: 10%;
+            width: 80%;
+            height: 70%;
+            border: 3px dashed #ff3333;
+            border-radius: 8px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4); /* Assombrit l'extérieur du cadre */
+            pointer-events: none;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+        }
+        #scan-region-guide::after {
+            content: "Placez les étiquettes DANS ce cadre";
+            color: #fff;
+            background: rgba(255, 51, 51, 0.85);
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 0 0 4px 4px;
+        }
+
         button {
             background-color: #007bff;
             color: white;
@@ -41,7 +66,7 @@
             cursor: pointer;
             margin-top: 15px;
             width: 100%;
-            max-width: 550px;
+            max-width: 500px;
             transition: background 0.2s;
         }
         button:active { background-color: #0056b3; }
@@ -51,38 +76,38 @@
         #btn-save:active { background-color: #1e7e34; }
         
         #status {
-            margin-top: 15px;
+            margin-top: 12px;
             font-weight: bold;
             color: #495057;
-            font-size: 1rem;
+            font-size: 0.95rem;
         }
         
         #result-box {
             margin-top: 20px;
             padding: 15px;
             border-radius: 8px;
-            max-width: 520px;
+            max-width: 470px;
             margin-left: auto;
             margin-right: auto;
             display: none;
             text-align: left;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        #result-box h3 { margin-top: 0; font-size: 1.2rem; }
+        #result-box h3 { margin-top: 0; font-size: 1.15rem; }
         .success { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
         .error { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
         
         /* Historique */
         #history-container {
-            margin-top: 35px;
-            max-width: 600px;
+            margin-top: 30px;
+            max-width: 500px;
             margin-left: auto;
             margin-right: auto;
             text-align: left;
         }
         #btn-download-csv { 
             background-color: #6c757d; 
-            margin-bottom: 15px; 
+            margin-bottom: 12px; 
             padding: 8px 15px; 
             font-size: 0.85rem;
             width: auto;
@@ -101,18 +126,17 @@
         }
         th, td {
             border-bottom: 1px solid #ddd;
-            padding: 10px;
+            padding: 8px;
             text-align: center;
         }
         th { background-color: #f8f9fa; color: #333; font-weight: bold; }
-        tr:last-child td { border-bottom: none; }
         
         details {
-            margin-top: 15px;
+            margin-top: 12px;
             background: rgba(255, 255, 255, 0.6);
             padding: 8px;
             border-radius: 4px;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
         }
         summary { cursor: pointer; font-weight: bold; color: #666; }
     </style>
@@ -120,13 +144,15 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Scannez l'étiquette blanche et de couleur simultanément</p>
+    <p class="subtitle">Cadrez précisément l'étiquette dans la zone rouge</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
+        <!-- Reticule de visée -->
+        <div id="scan-region-guide"></div>
     </div>
 
-    <button id="capture-btn">📷 Analyser l'Étiquette</button>
+    <button id="capture-btn">📷 Analyser la Zone Ciblée</button>
     <div id="status">Initialisation de la caméra...</div>
 
     <div id="result-box">
@@ -134,33 +160,32 @@
         <p id="result-desc"></p>
         <button id="btn-save">💾 Valider & Enregistrer ce contrôle</button>
         <details>
-            <summary>Voir le texte brut lu par l'appareil</summary>
+            <summary>Voir le texte brut lu dans la zone</summary>
             <pre id="raw-text" style="white-space: pre-wrap; font-size: 0.8rem; background: #eee; padding: 5px; margin-top: 5px; max-height: 150px; overflow-y: auto;"></pre>
         </details>
     </div>
 
     <!-- Section Historique -->
     <div id="history-container">
-        <h3>Historique des contrôles de la session</h3>
+        <h3>Historique de la session</h3>
         <button id="btn-download-csv">⬇️ Exporter l'historique (.CSV)</button>
         <div class="table-responsive">
             <table id="history-table">
                 <thead>
                     <tr>
-                        <th>Date/Heure</th>
+                        <th>Heure</th>
                         <th>N° Suivi (T)</th>
-                        <th>Code Couleur</th>
+                        <th>Code Produit</th>
                         <th>Résultat</th>
                     </tr>
                 </thead>
-                <tbody id="history-body">
-                    <!-- Rempli en JS -->
-                </tbody>
+                <tbody id="history-body"></tbody>
             </table>
         </div>
     </div>
 
-    <canvas id="canvas" style="display:none;"></canvas>
+    <canvas id="canvas-full" style="display:none;"></canvas>
+    <canvas id="canvas-cropped" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video');
@@ -172,13 +197,14 @@
         const resultTitle = document.getElementById('result-title');
         const resultDesc = document.getElementById('result-desc');
         const rawTextPre = document.getElementById('raw-text');
-        const canvas = document.getElementById('canvas');
+        const canvasFull = document.getElementById('canvas-full');
+        const canvasCropped = document.getElementById('canvas-cropped');
         const historyBody = document.getElementById('history-body');
 
         let dernierControle = null;
         let listeControles = [];
 
-        // 1. Démarrage de la caméra avec focus arrière optimal
+        // Démarrage caméra
         navigator.mediaDevices.getUserMedia({ 
             video: { 
                 facingMode: "environment",
@@ -188,53 +214,67 @@
         })
         .then(stream => { 
             video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Cadrez bien les deux étiquettes de près et sans reflets."; 
+            statusDiv.innerText = "Prêt. Alignez l'étiquette dans la zone rouge."; 
         })
         .catch(err => { 
             statusDiv.innerText = "Erreur : Impossible d'accéder à l'appareil photo."; 
         });
 
-        // 2. Événement Capture
+        // Capture et DÉCOUPAGE de la zone cible
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Lecture de l'image (OCR en cours)...";
+            statusDiv.innerText = "Extraction de la zone & analyse OCR...";
 
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // 1. Capture de l'image complète
+            canvasFull.width = video.videoWidth;
+            canvasFull.height = video.videoHeight;
+            const ctxFull = canvasFull.getContext('2d');
+            ctxFull.drawImage(video, 0, 0, canvasFull.width, canvasFull.height);
+
+            // 2. Calcul du découpage (Zone correspondant au cadre rouge : 80% largeur, 70% hauteur, centré)
+            const cropX = canvasFull.width * 0.10;
+            const cropY = canvasFull.height * 0.15;
+            const cropWidth = canvasFull.width * 0.80;
+            const cropHeight = canvasFull.height * 0.70;
+
+            // 3. Dessiner uniquement la sous-zone sur le canvas découpé
+            canvasCropped.width = cropWidth;
+            canvasCropped.height = cropHeight;
+            const ctxCropped = canvasCropped.getContext('2d');
+            ctxCropped.drawImage(
+                canvasFull, 
+                cropX, cropY, cropWidth, cropHeight, // Source
+                0, 0, cropWidth, cropHeight          // Destination
+            );
 
             try {
-                // Initialisation du worker Tesseract
+                // Envoi exclusif de la zone découpée à Tesseract (beaucoup plus rapide et précis)
                 const worker = await Tesseract.createWorker(['fra', 'eng']);
-                const { data: { text } } = await worker.recognize(canvas);
+                const { data: { text } } = await worker.recognize(canvasCropped);
                 await worker.terminate();
 
                 rawTextPre.innerText = text;
                 analyserTexte(text);
             } catch (error) {
-                statusDiv.innerText = "Erreur technique lors de l'analyse de l'image.";
+                statusDiv.innerText = "Erreur lors de l'analyse de l'image.";
                 captureBtn.disabled = false;
             }
         });
 
-        // 3. Algorithme d'analyse automatique et tolérant
         function analyserTexte(text) {
             statusDiv.innerText = "Analyse terminée.";
             captureBtn.disabled = false;
 
-            // Nettoyage de sécurité : tout en majuscules
             let texteFormate = text.toUpperCase();
 
-            // Extraction du numéro "T" (Cherche un T suivi de 7 à 10 chiffres)
+            // Extraction N° T
             const regexNumeroT = /T\d{7,10}/g;
             const numeroTMatches = texteFormate.match(regexNumeroT);
             const numeroT = numeroTMatches ? numeroTMatches[0] : "INCONNU";
 
-            // Détection élargie des deux types d'étiquettes présents dans votre usine
-            // On cherche si les termes clés sont présents n'importe où sur l'image
+            // Détection des codes produits
             const contient19 = texteFormate.includes("19MB4") || texteFormate.includes("19MB");
             const contient23 = texteFormate.includes("23MB4") || texteFormate.includes("23MB");
 
@@ -242,38 +282,32 @@
             let message = "";
             let codeFinalEnregistre = "NON IDENTIFIÉ";
 
-            // LOGIQUE DE DÉTECTION DES ERREURS (POKA-YOKE)
             if (contient19 && contient23) {
-                // Si l'IA lit à la fois du 19 et du 23 sur la même photo -> Erreur critique d'étiquetage !
                 estConforme = false;
                 codeFinalEnregistre = "CONFLIT (19/23)";
-                message = `⚠️ ALERTE INCOHÉRENCE ! L'appareil détecte simultanément du 19MB4 et du 23MB4 sur la bobine. L'étiquette de couleur ne correspond pas à l'étiquette blanche.`;
+                message = `⚠️ ALERTE INCOHÉRENCE ! Présence simultanée de 19MB4 et 23MB4 dans la zone scannée.`;
                 afficherResultat(false, `❌ ERREUR DE CONFORMITÉ`, message);
             } 
             else if (contient19 || contient23) {
-                // Un seul des deux codes est présent sur l'image -> Pas de conflit détecté
                 estConforme = true;
                 codeFinalEnregistre = contient23 ? "23MB4" : "19MB4";
-                message = `La bobine est validée comme étant du ${codeFinalEnregistre}. Aucun doublon ou étiquette contradictoire n'a été trouvé sur l'image.`;
+                message = `Code validé : ${codeFinalEnregistre}. Aucune étiquette contradictoire dans la zone.`;
                 afficherResultat(true, `✅ CONFORME (OK) - Suivi : ${numeroT}`, message);
             } 
             else {
-                // Aucun repère MB trouvé
                 estConforme = false;
                 codeFinalEnregistre = "ILLISIBLE";
-                message = `Aucun code produit exploitable (ex: 23MB4 ou 19MB4) n'a pu être extrait. Rapprochez le téléphone de l'étiquette, évitez les reflets du plastique et réessayez.`;
-                afficherResultat(false, `🔍 CODE COULEUR INTROUVABLE`, message);
+                message = `Aucun code (ex: 23MB4 ou 19MB4) n'a été trouvé DANS la zone rouge. Ajustez le recul du téléphone.`;
+                afficherResultat(false, `🔍 CODE INTROUVABLE DANS LA ZONE`, message);
             }
 
-            // Préparation des données pour l'historique
             dernierControle = {
-                date: new Date().toLocaleString('fr-FR'),
+                date: new Date().toLocaleTimeString('fr-FR'),
                 suivi: numeroT,
                 code: codeFinalEnregistre,
                 statut: estConforme ? "CONFORME" : "ERREUR"
             };
             
-            // On affiche le bouton de sauvegarde si un numéro T ou un code a pu être extrait
             if (numeroT !== "INCONNU" || estConforme || codeFinalEnregistre !== "ILLISIBLE") {
                 btnSave.style.display = "block";
             }
@@ -286,10 +320,8 @@
             resultBox.style.display = "block";
         }
 
-        // 4. Enregistrement dans l'historique local (Tableau)
         btnSave.addEventListener('click', () => {
             if (!dernierControle) return;
-
             listeControles.push(dernierControle);
 
             const row = document.createElement('tr');
@@ -299,37 +331,21 @@
                 <td>${dernierControle.code}</td>
                 <td style="color: ${dernierControle.statut === 'CONFORME' ? '#155724' : '#721c24'}; font-weight:bold;">${dernierControle.statut}</td>
             `;
-            
-            // Ajoute le dernier scan en haut de la table pour une lecture directe
             historyBody.insertBefore(row, historyBody.firstChild);
-            
             btnSave.style.display = "none";
-            statusDiv.innerText = "Contrôle ajouté à l'historique de session.";
+            statusDiv.innerText = "Contrôle ajouté à l'historique.";
         });
 
-        // 5. Export de la session en fichier CSV pour Excel
         btnDownloadCsv.addEventListener('click', () => {
-            if (listeControles.length === 0) {
-                alert("L'historique est vide. Enregistrez au moins un contrôle avant d'exporter.");
-                return;
-            }
-
-            // En-tête avec encodage UTF-8 pour les accents sous Excel
-            let csvContent = "\uFEFF"; 
-            csvContent += "Date et Heure;Numero Suivi T;Code Produit Detecte;Statut Final\n";
-            
-            listeControles.forEach(c => {
-                csvContent += `${c.date};${c.suivi};${c.code};${c.statut}\n`;
-            });
-
+            if (listeControles.length === 0) return alert("Historique vide.");
+            let csvContent = "\uFEFFHeure;Numero Suivi T;Code Produit;Statut\n";
+            listeControles.forEach(c => { csvContent += `${c.date};${c.suivi};${c.code};${c.statut}\n`; });
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.setAttribute("href", url);
-            link.setAttribute("download", `historique_scans_${new Date().toISOString().slice(0,10)}.csv`);
-            document.body.appendChild(link);
+            link.href = url;
+            link.download = `historique_scans_${new Date().toISOString().slice(0,10)}.csv`;
             link.click();
-            document.body.removeChild(link);
         });
     </script>
 </body>
