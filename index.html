@@ -11,6 +11,7 @@
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
             margin: 0;
             padding: 15px;
+            padding-bottom: 100px; /* Espace pour éviter de masquer le bas par le bouton fixe */
             background-color: #f4f4f9;
             text-align: center;
         }
@@ -30,20 +31,20 @@
         }
         video { width: 100%; display: block; }
         
-        /* Cadre de visée ciblé pour l'étiquette blanche (Numéro T) */
+        /* Bande de visée en haut pour l'étiquette blanche (Numéro T) */
         #scan-region-guide {
             position: absolute;
             top: 5%;
-            left: 40%;
-            width: 60%;
-            height: 10%;
+            left: 5%;
+            width: 90%;
+            height: 15%;
             border: 3px dashed #ff3333;
             border-radius: 8px;
-            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35); /* Assombrit le reste */
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35); /* Assombrit le reste de l'image */
             pointer-events: none;
             display: flex;
             align-items: flex-start;
-            justify-content: top;
+            justify-content: center;
         }
         #scan-region-guide::after {
             content: "Cadrez l'étiquette blanche (Numéro T) ICI";
@@ -51,28 +52,44 @@
             background: rgba(255, 51, 51, 0.85);
             font-size: 0.75rem;
             font-weight: bold;
-            padding: 3px 8px;
+            padding: 2px 8px;
             border-radius: 0 0 4px 4px;
         }
 
+        /* Style général des boutons */
         button {
-            background-color: #007bff;
-            color: white;
             border: none;
             padding: 14px 24px;
             font-size: 1.05rem;
             font-weight: bold;
             border-radius: 8px;
             cursor: pointer;
-            margin-top: 15px;
-            width: 100%;
-            max-width: 500px;
             transition: background 0.2s;
         }
-        button:active { background-color: #0056b3; }
-        button:disabled { background-color: #cccccc; cursor: not-allowed; }
+
+        /* Bouton Analyser FIXE en bas de l'écran */
+        #capture-btn {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 500px;
+            background-color: #007bff;
+            color: white;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        #capture-btn:active { background-color: #0056b3; }
+        #capture-btn:disabled { background-color: #cccccc; cursor: not-allowed; }
         
-        #btn-save { background-color: #28a745; display: none; margin-bottom: 10px; }
+        #btn-save { 
+            background-color: #28a745; 
+            color: white;
+            display: none; 
+            margin-bottom: 10px; 
+            width: 100%;
+        }
         #btn-save:active { background-color: #1e7e34; }
         
         #status {
@@ -107,6 +124,7 @@
         }
         #btn-download-csv { 
             background-color: #6c757d; 
+            color: white;
             margin-bottom: 12px; 
             padding: 8px 15px; 
             font-size: 0.85rem;
@@ -144,7 +162,7 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Cadrez l'étiquette blanche dans le rectangle rouge</p>
+    <p class="subtitle">Placez l'étiquette blanche dans la bande rouge en haut</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -152,7 +170,9 @@
         <div id="scan-region-guide"></div>
     </div>
 
+    <!-- Bouton d'analyse fixé en bas -->
     <button id="capture-btn">📷 Analyser l'Étiquette</button>
+    
     <div id="status">Initialisation de la caméra...</div>
 
     <div id="result-box">
@@ -214,7 +234,7 @@
         })
         .then(stream => { 
             video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Alignez l'étiquette blanche dans le rectangle rouge."; 
+            statusDiv.innerText = "Prêt. Callez l'étiquette blanche dans le rectangle rouge."; 
         })
         .catch(err => { 
             statusDiv.innerText = "Erreur : Impossible d'accéder à l'appareil photo."; 
@@ -225,7 +245,7 @@
             captureBtn.disabled = true;
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Analyse en cours (Zone blanche + Image globale)...";
+            statusDiv.innerText = "Analyse en cours...";
 
             // 1. Capture de la photo complète
             canvasFull.width = video.videoWidth;
@@ -233,11 +253,11 @@
             const ctxFull = canvasFull.getContext('2d');
             ctxFull.drawImage(video, 0, 0, canvasFull.width, canvasFull.height);
 
-            // 2. Découpage spécifique de la zone du cadre rouge (10% marge X, 20% marge Y, 80% larg, 60% haut)
-            const cropX = canvasFull.width * 0.10;
-            const cropY = canvasFull.height * 0.20;
-            const cropWidth = canvasFull.width * 0.60;
-            const cropHeight = canvasFull.height * 0.10;
+            // 2. Découpage calqué sur la bande rouge (top: 5%, left: 5%, width: 90%, height: 15%)
+            const cropX = canvasFull.width * 0.05;
+            const cropY = canvasFull.height * 0.05;
+            const cropWidth = canvasFull.width * 0.90;
+            const cropHeight = canvasFull.height * 0.15;
 
             canvasCropped.width = cropWidth;
             canvasCropped.height = cropHeight;
@@ -251,17 +271,17 @@
             try {
                 const worker = await Tesseract.createWorker(['fra', 'eng']);
                 
-                // Analyse 1 : Toute la photo (pour détecter l'étiquette de couleur n'importe où)
+                // Passage 1 : Photo globale (détection code produit/couleur n'importe où)
                 const { data: { text: texteGlobal } } = await worker.recognize(canvasFull);
                 
-                // Analyse 2 : Uniquement la zone ciblée (pour extraire le numéro T proprement)
+                // Passage 2 : Bande ciblée (extraction précise du Numéro T)
                 const { data: { text: texteCadre } } = await worker.recognize(canvasCropped);
 
                 await worker.terminate();
 
-                // Affichage dans l'inspecteur de texte
-                rawTextPre.innerText = "--- TEXTE DU CADRE (Étiquette blanche) ---\n" + texteCadre + 
-                                       "\n\n--- TEXTE GLOBAL (Ensemble de la vue) ---\n" + texteGlobal;
+                // Inspecteur de texte
+                rawTextPre.innerText = "--- BANDE ROUGE (Étiquette blanche) ---\n" + texteCadre + 
+                                       "\n\n--- IMAGE GLOBALE ---\n" + texteGlobal;
 
                 analyserDoubleZone(texteGlobal, texteCadre);
             } catch (error) {
@@ -277,17 +297,17 @@
             let globalFormate = texteGlobal.toUpperCase();
             let cadreFormate = texteCadre.toUpperCase();
 
-            // 1. Extraction N° T : Priorité absolue au texte à l'intérieur du cadre rouge
+            // 1. Extraction du Numéro T (Priorité à la bande rouge)
             const regexNumeroT = /T\d{7,10}/g;
             let numeroTMatches = cadreFormate.match(regexNumeroT);
             
-            // Secours : si non trouvé dans le cadre, cherche sur l'image entière
+            // Secours si hors cadre
             if (!numeroTMatches) {
                 numeroTMatches = globalFormate.match(regexNumeroT);
             }
             const numeroT = numeroTMatches ? numeroTMatches[0] : "INCONNU";
 
-            // 2. Détection des codes couleurs/produits sur l'ENSEMBLE de la photo
+            // 2. Détection des codes sur l'ensemble de la vue
             const contient19 = globalFormate.includes("19MB4") || globalFormate.includes("19MB");
             const contient23 = globalFormate.includes("23MB4") || globalFormate.includes("23MB");
 
@@ -297,28 +317,25 @@
 
             // 3. Logique Poka-Yoke
             if (contient19 && contient23) {
-                // Incohérence majeure (ex: étiquette blanche 23MB4 + étiquette plastique 19MB4)
                 estConforme = false;
                 codeFinalEnregistre = "CONFLIT (19/23)";
-                message = `⚠️ ALERTE INCOHÉRENCE ! Présence simultanée de 19MB4 et 23MB4 sur l'image. L'étiquette de couleur ne correspond pas au code de suivi.`;
+                message = `⚠️ ALERTE INCOHÉRENCE ! Présence simultanée de 19MB4 et 23MB4 sur l'image.`;
                 afficherResultat(false, `❌ ERREUR DE CONFORMITÉ`, message);
             } 
             else if (contient19 || contient23) {
-                // Un seul code trouvé, aucune contradiction
                 estConforme = true;
                 codeFinalEnregistre = contient23 ? "23MB4" : "19MB4";
-                message = `Code validé : ${codeFinalEnregistre}. Aucune étiquette contradictoire sur l'image.`;
+                message = `Code validé : ${codeFinalEnregistre}. Aucune étiquette contradictoire.`;
                 afficherResultat(true, `✅ CONFORME (OK) - Suivi : ${numeroT}`, message);
             } 
             else {
-                // Aucun repère produit identifié
                 estConforme = false;
                 codeFinalEnregistre = "ILLISIBLE";
-                message = `Aucun code produit (ex: 23MB4 ou 19MB4) n'a pu être extrait de la photo. Réessayez sans reflets.`;
+                message = `Aucun code produit (ex: 23MB4 ou 19MB4) n'a été trouvé.`;
                 afficherResultat(false, `🔍 CODE PRODUIT INTROUVABLE`, message);
             }
 
-            // Préparation de l'historique
+            // Préparation enregistrement
             dernierControle = {
                 date: new Date().toLocaleTimeString('fr-FR'),
                 suivi: numeroT,
@@ -338,7 +355,7 @@
             resultBox.style.display = "block";
         }
 
-        // Gestion de la sauvegarde
+        // Sauvegarde dans le tableau
         btnSave.addEventListener('click', () => {
             if (!dernierControle) return;
             listeControles.push(dernierControle);
