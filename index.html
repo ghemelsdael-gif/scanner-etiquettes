@@ -3,16 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contrôle Poka-Yoke Conforme</title>
+    <title>Contrôle Automatique Poka-Yoke</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 15px; padding-bottom: 110px; background-color: #f4f4f9; text-align: center; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; padding: 15px; padding-bottom: 110px; background-color: #f4f4f9; text-align: center; }
+        h1 { color: #333; font-size: 1.3rem; margin-bottom: 2px; }
         #video-container { position: relative; width: 100%; max-width: 500px; margin: 0 auto; border: 3px solid #333; border-radius: 12px; overflow: hidden; background: #000; }
         video { width: 100%; display: block; }
         button { border: none; padding: 14px 24px; font-size: 1.05rem; font-weight: bold; border-radius: 8px; cursor: pointer; }
         #capture-btn { position: fixed; bottom: 15px; left: 50%; transform: translateX(-50%); width: 90%; max-width: 500px; background-color: #007bff; color: white; z-index: 1000; }
-        #btn-save { background-color: #28a745; color: white; display: none; margin-top: 10px; width: 100%; }
-        #result-box { margin-top: 15px; padding: 15px; border-radius: 8px; max-width: 470px; margin: 0 auto; display: none; text-align: left; }
+        #btn-save { background-color: #28a745; color: white; display: none; margin-bottom: 10px; width: 100%; }
+        #result-box { margin-top: 15px; padding: 15px; border-radius: 8px; max-width: 470px; margin: 15px auto; display: none; text-align: left; }
         .success { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
         .error { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; font-size: 0.85rem; }
@@ -20,34 +21,35 @@
     </style>
 </head>
 <body>
-
-    <h1>Contrôle Poka-Yoke</h1>
+    <h1>Contrôle Automatique Poka-Yoke</h1>
     <div id="video-container"><video id="video" autoplay playsinline></video></div>
-    <button id="capture-btn">📷 Analyser la conformité</button>
+    <button id="capture-btn">📷 Analyser l'Étiquette</button>
     <div id="status">Prêt.</div>
 
     <div id="result-box">
         <h3 id="result-title"></h3>
         <p id="result-desc"></p>
-        <button id="btn-save">💾 Valider ce contrôle</button>
+        <button id="btn-save">💾 Valider & Enregistrer</button>
     </div>
 
     <div id="history-container">
         <h3>Historique</h3>
-        <table><thead><tr><th>Heure</th><th>T</th><th>Code</th><th>Statut</th></tr></thead><tbody id="history-body"></tbody></table>
+        <button id="btn-download-csv" style="background:#6c757d; color:white; font-size:0.8rem; margin-bottom:10px;">⬇️ Exporter CSV</button>
+        <table><thead><tr><th>Heure</th><th>N° Suivi (T)</th><th>Code</th><th>Statut</th></tr></thead><tbody id="history-body"></tbody></table>
     </div>
 
     <canvas id="canvas-resized" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video'), captureBtn = document.getElementById('capture-btn'), btnSave = document.getElementById('btn-save');
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => video.srcObject = s);
+        let dernierControle = null; let listeControles = [];
 
-        let dernierControle = null;
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => video.srcObject = s);
 
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
             document.getElementById('result-box').style.display = "none";
+            btnSave.style.display = "none";
             document.getElementById('status').innerText = "Analyse en cours...";
 
             const canvas = document.getElementById('canvas-resized');
@@ -66,38 +68,41 @@
             if (has19) codes.push("19MB4");
             if (has23) codes.push("23MB4");
 
-            let type = "ERROR", titre = "❌ ÉCHEC", msg = "";
+            let type = "ERROR", titre = "", msg = "";
 
             if (numeroT === "INCONNU") {
-                titre = "❌ ERREUR : N° T MANQUANT";
-                msg = "Étiquette blanche (Suivi T) non détectée.";
+                titre = "❌ ERREUR : N° T MANQUANT"; msg = "Étiquette blanche (Suivi T) non détectée.";
             } else if (codes.length === 0) {
-                titre = "❌ ERREUR : CODE PRODUIT ABSENT";
-                msg = "Aucun code 19MB ou 23MB détecté.";
+                titre = "❌ ERREUR : CODE PRODUIT ABSENT"; msg = "Aucun code 19MB ou 23MB trouvé.";
             } else if (codes.length > 1) {
-                titre = "❌ ERREUR DE CONFORMITÉ";
-                msg = "Incohérence : 19MB et 23MB détectés simultanément.";
+                titre = "❌ ERREUR DE CONFORMITÉ"; msg = "Incohérence : 19MB et 23MB détectés simultanément.";
             } else {
                 type = "SUCCESS";
                 titre = `✅ CONFORME : ${codes[0]}`;
-                msg = `Suivi ${numeroT} validé avec le code ${codes[0]}.`;
-                dernierControle = { date: new Date().toLocaleTimeString(), t: numeroT, code: codes[0] };
+                msg = `Suivi ${numeroT} validé. Code ${codes[0]} conforme aux deux étiquettes.`;
+                dernierControle = { date: new Date().toLocaleTimeString(), t: numeroT, code: codes[0], statut: "CONFORME" };
+                btnSave.style.display = "block";
             }
 
             document.getElementById('result-title').innerText = titre;
             document.getElementById('result-desc').innerText = msg;
             document.getElementById('result-box').className = type.toLowerCase();
             document.getElementById('result-box').style.display = "block";
-            btnSave.style.display = (type === "SUCCESS") ? "block" : "none";
-            document.getElementById('status').innerText = "Analyse terminée.";
             captureBtn.disabled = false;
         });
 
         btnSave.onclick = () => {
-            if (!dernierControle) return;
+            listeControles.push(dernierControle);
             const row = document.getElementById('history-body').insertRow(0);
-            row.innerHTML = `<td>${dernierControle.date}</td><td>${dernierControle.t}</td><td>${dernierControle.code}</td><td>OK</td>`;
+            row.innerHTML = `<td>${dernierControle.date}</td><td>${dernierControle.t}</td><td>${dernierControle.code}</td><td>${dernierControle.statut}</td>`;
             btnSave.style.display = "none";
+        };
+
+        document.getElementById('btn-download-csv').onclick = () => {
+            let csv = "Heure;T;Code;Statut\n";
+            listeControles.forEach(c => csv += `${c.date};${c.t};${c.code};${c.statut}\n`);
+            const a = document.createElement("a"); a.href = "data:text/csv;charset=utf-8," + encodeURI(csv);
+            a.download = "historique.csv"; a.click();
         };
     </script>
 </body>
