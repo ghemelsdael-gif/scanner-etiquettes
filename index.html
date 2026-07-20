@@ -3,9 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contrôle Poka-Yoke (Haute Définition)</title>
-    <!-- Librairies de lecture de code-barres et OCR -->
-    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <title>Contrôle Automatique Poka-Yoke</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
         body {
@@ -32,13 +30,13 @@
         }
         video { width: 100%; display: block; }
         
-        /* Cadre rouge de visée */
+        /* Zone de cadrage */
         #scan-region-guide {
             position: absolute;
-            top: 15%;
+            top: 10%;
             left: 5%;
             width: 90%;
-            height: 25%;
+            height: 40%;
             border: 3px dashed #ff3333;
             border-radius: 8px;
             box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.4);
@@ -48,29 +46,13 @@
             justify-content: center;
         }
         #scan-region-guide::after {
-            content: "Cadrez le code-barres T... ici";
+            content: "Cadrez l'étiquette blanche (Haut) ICI";
             color: #fff;
             background: rgba(255, 51, 51, 0.9);
             font-size: 0.75rem;
             font-weight: bold;
             padding: 2px 8px;
             border-radius: 0 0 4px 4px;
-        }
-
-        #live-barcode-status {
-            position: absolute;
-            bottom: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.75);
-            color: #fff;
-            padding: 8px 15px;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 0.85rem;
-            white-space: nowrap;
-            transition: all 0.3s;
-            z-index: 10;
         }
 
         button {
@@ -126,25 +108,24 @@
 </head>
 <body>
 
-    <h1>Contrôle Poka-Yoke</h1>
-    <p class="subtitle">Scanner HD + Analyse OCR</p>
+    <h1>Contrôle Automatique Poka-Yoke</h1>
+    <p class="subtitle">Analyse OCR haute netteté</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
         <div id="scan-region-guide"></div>
-        <div id="live-barcode-status">🔍 Recherche du code-barres...</div>
     </div>
 
-    <button id="capture-btn">📷 Analyser la couleur (19/23MB)</button>
-    <div id="status">Démarrage de la caméra...</div>
+    <button id="capture-btn">📷 Analyser l'Étiquette</button>
+    <div id="status">Initialisation...</div>
 
     <div id="result-box">
         <h3 id="result-title"></h3>
         <p id="result-desc"></p>
-        <button id="btn-save">💾 Valider & Enregistrer</button>
+        <button id="btn-save">💾 Valider & Enregistrer ce contrôle</button>
         <details style="margin-top:10px; font-size:0.8rem; color:#666;">
-            <summary>Voir le texte OCR brut</summary>
-            <pre id="raw-text" style="white-space: pre-wrap; background: #eee; padding: 5px;"></pre>
+            <summary>Voir le texte extrait par l’appareil</summary>
+            <pre id="raw-text" style="white-space: pre-wrap; background: #eee; padding: 5px; max-height:150px; overflow-y:auto;"></pre>
         </details>
     </div>
 
@@ -163,7 +144,6 @@
 
     <script>
         const video = document.getElementById('video');
-        const liveBarcodeStatus = document.getElementById('live-barcode-status');
         const captureBtn = document.getElementById('capture-btn');
         const btnSave = document.getElementById('btn-save');
         const statusDiv = document.getElementById('status');
@@ -171,116 +151,71 @@
         const rawTextPre = document.getElementById('raw-text');
         const canvasFull = document.getElementById('canvas-full');
 
-        let codeSuiviVerrouille = "INCONNU";
         let dernierControle = null;
         let listeControles = [];
 
-        // Initialisation de la vidéo en Haute Résolution (Full HD)
-        async function demarrerCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: "environment",
-                        width: { min: 1280, ideal: 1920 },
-                        height: { min: 720, ideal: 1080 },
-                        focusMode: { ideal: "continuous" }
-                    }
-                });
-                video.srcObject = stream;
-                statusDiv.innerText = "Prêt. Approchez le code-barres à ~20 cm.";
-                
-                // Démarrage du scanner QuaggaJS en arrière-plan
-                initQuagga();
-            } catch (err) {
-                statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra.";
-            }
-        }
+        // Démarrage vidéo avec demande d'une résolution maximale
+        navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: "environment",
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            } 
+        })
+        .then(stream => { 
+            video.srcObject = stream; 
+            statusDiv.innerText = "Prêt. Tenez le téléphone stable à ~25-30 cm."; 
+        })
+        .catch(err => { 
+            statusDiv.innerText = "Erreur : Impossible d'accéder à la caméra."; 
+        });
 
-        function initQuagga() {
-            Quagga.init({
-                inputStream: {
-                    name: "Live",
-                    type: "LiveStream",
-                    target: video,
-                    constraints: {
-                        facingMode: "environment"
-                    },
-                    area: { // Zone de détection restreinte au cadre central
-                        top: "15%",
-                        right: "5%",
-                        left: "5%",
-                        bottom: "60%"
-                    }
-                },
-                decoder: {
-                    readers: ["code_128_reader", "code_39_reader", "code_39_vin_reader"]
-                },
-                locate: true
-            }, function(err) {
-                if (err) return console.error(err);
-                Quagga.start();
-            });
-
-            Quagga.onDetected(function(result) {
-                if (result && result.codeResult && result.codeResult.code) {
-                    let codeText = result.codeResult.code.toUpperCase().trim();
-                    
-                    // Si le code commence par T suivi de chiffres
-                    const match = codeText.match(/T\d{7,10}/);
-                    if (match) {
-                        codeSuiviVerrouille = match[0];
-                        liveBarcodeStatus.innerText = "✅ Code lu : " + codeSuiviVerrouille;
-                        liveBarcodeStatus.style.backgroundColor = "#28a745";
-                    } else if (codeText.startsWith("T") && codeText.length >= 8) {
-                        codeSuiviVerrouille = codeText;
-                        liveBarcodeStatus.innerText = "✅ Code lu : " + codeSuiviVerrouille;
-                        liveBarcodeStatus.style.backgroundColor = "#28a745";
-                    }
-                }
-            });
-        }
-
-        // Action lors du clic sur "Analyser"
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Analyse de la conformité...";
+            statusDiv.innerText = "Analyse OCR du texte en cours...";
 
-            // Photo haute définition
+            // Photo nette
             canvasFull.width = video.videoWidth;
             canvasFull.height = video.videoHeight;
             const ctxFull = canvasFull.getContext('2d');
             ctxFull.drawImage(video, 0, 0, canvasFull.width, canvasFull.height);
 
             try {
+                // OCR Tesseract
                 const worker = await Tesseract.createWorker(['fra', 'eng']);
-                const { data: { text: texteGlobal } } = await worker.recognize(canvasFull);
+                
+                const { data: { text: texteBrut } } = await worker.recognize(canvasFull);
                 await worker.terminate();
 
-                rawTextPre.innerText = texteGlobal;
+                rawTextPre.innerText = texteBrut;
 
-                // Secours : Si Quagga n'a pas vu le code-barres, l'OCR essaie de trouver le T dans le texte
-                if (codeSuiviVerrouille === "INCONNU") {
-                    const matchOCR = texteGlobal.toUpperCase().match(/T\d{7,10}/);
-                    if (matchOCR) {
-                        codeSuiviVerrouille = matchOCR[0];
-                    }
-                }
-
-                analyserConformite(texteGlobal);
+                analyserContenu(texteBrut);
             } catch (error) {
-                statusDiv.innerText = "Erreur lors de l'analyse OCR.";
+                statusDiv.innerText = "Erreur lors de la lecture OCR.";
                 captureBtn.disabled = false;
             }
         });
 
-        function analyserConformite(texteGlobal) {
+        function analyserContenu(texteBrut) {
             statusDiv.innerText = "Analyse terminée.";
             captureBtn.disabled = false;
 
-            let texteFormate = texteGlobal.toUpperCase();
+            // Nettoyage du texte : remplace les erreurs courantes de Tesseract (ex: '7' ou '1' pris pour 'T')
+            let texteFormate = texteBrut.toUpperCase();
 
+            // 1. Recherche du N° de suivi 'T' (ex: T487536101)
+            // Accepte T suivi de 7 à 10 chiffres, ou corrige si le T a été mal lu (ex: "T 487536101")
+            const regexT = /T\s*?\d{7,10}/g;
+            let matchT = texteFormate.match(regexT);
+
+            let numeroT = "INCONNU";
+            if (matchT) {
+                numeroT = matchT[0].replace(/\s+/g, ''); // Retire les espaces accidentels
+            }
+
+            // 2. Recherche du Code Produit (23MB4 / 19MB4)
             const contient19 = texteFormate.includes("19MB4") || texteFormate.includes("19MB");
             const contient23 = texteFormate.includes("23MB4") || texteFormate.includes("23MB");
 
@@ -289,49 +224,43 @@
             let message = "";
             let codeFinal = "NON IDENTIFIÉ";
 
+            // LOGIQUE POKA-YOKE
             if (contient19 && contient23) {
                 typeResultat = "ERROR";
                 codeFinal = "CONFLIT (19/23)";
                 titre = `❌ ERREUR DE CONFORMITÉ`;
-                message = `ALERTE : Incohérence ! Présence simultanée de 19MB et 23MB sur la photo.`;
+                message = `ALERTE : Incohérence ! Présence simultanée de 19MB4 et 23MB4 sur l'image.`;
             } 
             else if (contient19 || contient23) {
                 codeFinal = contient23 ? "23MB4" : "19MB4";
                 
-                if (codeSuiviVerrouille !== "INCONNU") {
+                if (numeroT !== "INCONNU") {
                     typeResultat = "SUCCESS";
-                    titre = `✅ CONFORME (OK) - Suivi : ${codeSuiviVerrouille}`;
-                    message = `Code ${codeFinal} validé sans conflit. N° de suivi confirmé.`;
+                    titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
+                    message = `Code ${codeFinal} validé sans conflit. Numéro de suivi ${numeroT} extrait avec succès.`;
                 } else {
                     typeResultat = "WARNING";
                     titre = `⚠️ LECTURE PARTIELLE (Code: ${codeFinal})`;
-                    message = `Code ${codeFinal} détecté, mais le numéro T n'a pas pu être lu. Tenez la caméra fixe à 20cm du code-barres.`;
+                    message = `Code ${codeFinal} détecté, mais le numéro de suivi T est mal lisible. Cadrez bien la partie blanche en haut.`;
                 }
             } 
             else {
                 typeResultat = "ERROR";
                 codeFinal = "ILLISIBLE";
                 titre = `🔍 ÉCHEC DE LECTURE`;
-                message = `Impossible de lire le code produit. Évitez les reflets du plastique.`;
+                message = `Aucun code (23MB / 19MB) n'a pu être lu. Assurez-vous d'avoir assez de lumière et pas de reflet.`;
             }
 
             afficherResultat(typeResultat, titre, message);
 
             dernierControle = {
                 date: new Date().toLocaleTimeString('fr-FR'),
-                suivi: codeSuiviVerrouille,
+                suivi: numeroT,
                 code: codeFinal,
                 statut: typeResultat === "SUCCESS" ? "CONFORME" : (typeResultat === "WARNING" ? "PARTIEL" : "ERREUR")
             };
             
             btnSave.style.display = "block";
-            
-            // Réinitialisation après 3 secondes
-            setTimeout(() => {
-                codeSuiviVerrouille = "INCONNU";
-                liveBarcodeStatus.innerText = "🔍 Recherche du code-barres...";
-                liveBarcodeStatus.style.backgroundColor = "rgba(0, 0, 0, 0.75)";
-            }, 3000);
         }
 
         function afficherResultat(type, titre, description) {
@@ -368,8 +297,6 @@
             link.download = `historique_scans_${new Date().toISOString().slice(0,10)}.csv`;
             link.click();
         });
-
-        window.addEventListener('load', demarrerCamera);
     </script>
 </body>
 </html>
