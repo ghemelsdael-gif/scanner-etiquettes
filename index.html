@@ -107,7 +107,7 @@
 <body>
 
     <h1>Contrôle Automatique Poka-Yoke</h1>
-    <p class="subtitle">Analyse instantanée</p>
+    <p class="subtitle">Analyse instantanée dynamique</p>
     
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -122,7 +122,7 @@
         <p id="result-desc"></p>
         <button id="btn-save">💾 Valider & Enregistrer ce contrôle</button>
         <details style="margin-top:10px; font-size:0.8rem; color:#666;">
-            <summary>Voir les données lues</summary>
+            <summary>Voir les données lues lors du dernier scan</summary>
             <pre id="raw-text" style="white-space: pre-wrap; background: #eee; padding: 5px; max-height:150px; overflow-y:auto;"></pre>
         </details>
     </div>
@@ -160,7 +160,7 @@
         })
         .then(stream => { 
             video.srcObject = stream; 
-            statusDiv.innerText = "Prêt. Placez l'étiquette sous l'objectif."; 
+            statusDiv.innerText = "Prêt. Placez la nouvelle étiquette sous l'objectif."; 
         })
         .catch(err => { 
             statusDiv.innerText = "Erreur : Accès caméra refusé."; 
@@ -168,10 +168,15 @@
 
         captureBtn.addEventListener('click', async () => {
             captureBtn.disabled = true;
+            
+            // 1. Remise à zéro complète de l'interface et des variables
             resultBox.style.display = "none";
             btnSave.style.display = "none";
-            statusDiv.innerText = "Analyse en cours...";
+            dernierControle = null;
+            rawTextPre.innerText = "";
+            statusDiv.innerText = "Analyse en cours du nouveau cliché...";
 
+            // 2. Capture de la nouvelle image vidéo
             canvasTemp.width = video.videoWidth || 640;
             canvasTemp.height = video.videoHeight || 480;
             const ctx = canvasTemp.getContext('2d');
@@ -179,7 +184,7 @@
 
             let codeBarresTrouves = [];
 
-            // Détection native par le téléphone
+            // 3. Détection native par le téléphone
             if ('BarcodeDetector' in window) {
                 try {
                     const detector = new BarcodeDetector();
@@ -191,7 +196,7 @@
             }
 
             let texteBrut = codeBarresTrouves.join(" ");
-            rawTextPre.innerText = texteBrut || "Aucun texte lu par le scanner natif.";
+            rawTextPre.innerText = texteBrut || "Aucun code-barres détecté sur ce scan.";
 
             analyserDonnees(texteBrut);
         });
@@ -202,31 +207,52 @@
 
             let texteUpper = texteLu.toUpperCase();
 
-            // 1. Détection du N° T
+            // 1. Recherche dynamique du N° T sur ce scan précis
             const matchT = texteUpper.match(/T\d{7,10}/);
-            let numeroT = matchT ? matchT[0] : "T487536101"; // Fallback pour valider le flux
+            let numeroT = matchT ? matchT[0] : "INCONNU";
 
-            // 2. Détection Produit
+            // 2. Recherche du code produit sur ce scan précis
             const contient19 = texteUpper.includes("19MB");
-            const contient23 = texteUpper.includes("23MB") || true;
+            const contient23 = texteUpper.includes("23MB");
 
-            let typeResultat = "SUCCESS";
-            let titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
-            let message = `Bobine validée pour le code 23MB4. Aucune incohérence détectée.`;
+            let typeResultat = "ERROR";
+            let titre = "";
+            let message = "";
+            let codeProduitDetecte = "NON IDENTIFIÉ";
 
-            if (contient19 && texteUpper.includes("23MB")) {
+            if (contient19 && contient23) {
                 typeResultat = "ERROR";
+                codeProduitDetecte = "CONFLIT (19/23)";
                 titre = `❌ ERREUR DE CONFORMITÉ`;
                 message = `ALERTE : Incohérence détectée entre 19MB4 et 23MB4 !`;
+            } 
+            else if (contient19 || contient23) {
+                codeProduitDetecte = contient23 ? "23MB4" : "19MB4";
+                if (numeroT !== "INCONNU") {
+                    typeResultat = "SUCCESS";
+                    titre = `✅ CONFORME (OK) - Suivi : ${numeroT}`;
+                    message = `Bobine validée pour le code ${codeProduitDetecte}.`;
+                } else {
+                    typeResultat = "WARNING";
+                    titre = `⚠️ LECTURE PARTIELLE (Code: ${codeProduitDetecte})`;
+                    message = `Code ${codeProduitDetecte} détecté, mais le numéro de suivi T est illisible. Recommencez le scan.`;
+                }
+            } 
+            else {
+                typeResultat = "WARNING";
+                codeProduitDetecte = "23MB4"; // Par défaut si la détection visuelle échoue mais qu'il n'y a pas d'incohérence
+                titre = `⚠️ NOUVEAU SCAN EFFECTUÉ`;
+                message = `Aucune étiquette contradictoire détectée sur cette pièce. Suivi : ${numeroT}`;
             }
 
             afficherResultat(typeResultat, titre, message);
 
+            // Création de l'objet dynamique spécifique à cette pièce
             dernierControle = {
                 date: new Date().toLocaleTimeString('fr-FR'),
                 suivi: numeroT,
-                code: "23MB4",
-                statut: typeResultat === "SUCCESS" ? "CONFORME" : "ERREUR"
+                code: codeProduitDetecte,
+                statut: typeResultat === "SUCCESS" ? "CONFORME" : (typeResultat === "WARNING" ? "PARTIEL" : "ERREUR")
             };
             
             btnSave.style.display = "block";
@@ -242,16 +268,20 @@
         btnSave.addEventListener('click', () => {
             if (!dernierControle) return;
             listeControles.push(dernierControle);
+            
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${dernierControle.date}</td>
                 <td><strong>${dernierControle.suivi}</strong></td>
                 <td>${dernierControle.code}</td>
-                <td style="font-weight:bold; color: #155724;">${dernierControle.statut}</td>
+                <td style="font-weight:bold; color: ${
+                    dernierControle.statut === 'CONFORME' ? '#155724' : (dernierControle.statut === 'PARTIEL' ? '#856404' : '#721c24')
+                }">${dernierControle.statut}</td>
             `;
             document.getElementById('history-body').insertBefore(row, document.getElementById('history-body').firstChild);
+            
             btnSave.style.display = "none";
-            statusDiv.innerText = "Contrôle ajouté à l'historique.";
+            statusDiv.innerText = "Contrôle ajouté à l'historique. Prêt pour la pièce suivante.";
         });
 
         document.getElementById('btn-download-csv').addEventListener('click', () => {
@@ -261,7 +291,7 @@
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
+            link.href = url;
             link.download = `historique_scans_${new Date().toISOString().slice(0,10)}.csv`;
             link.click();
         });
