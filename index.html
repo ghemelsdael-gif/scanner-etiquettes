@@ -2,87 +2,79 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contrôle Poka-Yoke Stricte</title>
+    <title>Contrôle Poka-Yoke (Final)</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; padding: 15px; background-color: #f4f4f9; text-align: center; }
-        #video-container { position: relative; width: 100%; max-width: 500px; margin: 0 auto; border: 3px solid #333; border-radius: 12px; overflow: hidden; background: #000; }
-        video { width: 100%; display: block; }
-        button { border: none; padding: 14px 24px; font-size: 1.05rem; font-weight: bold; border-radius: 8px; cursor: pointer; margin-top: 15px; width: 90%; max-width: 500px; }
-        #capture-btn { background-color: #007bff; color: white; }
-        #result-box { margin-top: 15px; padding: 15px; border-radius: 8px; max-width: 470px; margin: 15px auto; display: none; text-align: left; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .success { background-color: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
-        .error { background-color: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
-        #btn-save { display: none; background: #28a745; color: white; margin-top: 10px; width: 100%; }
+        body { font-family: sans-serif; padding: 20px; text-align: center; background: #f4f4f9; }
+        #video-container { width: 100%; max-width: 500px; margin: 0 auto; border: 3px solid #333; }
+        video { width: 100%; }
+        #result-box { margin-top: 20px; padding: 20px; border-radius: 8px; display: none; }
+        .success { background: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
+        table { width: 100%; margin-top: 20px; border-collapse: collapse; background: white; }
+        th, td { border: 1px solid #ddd; padding: 8px; }
     </style>
 </head>
 <body>
-    <h1>Contrôle Poka-Yoke</h1>
+    <h1>Contrôle de Cohérence</h1>
     <div id="video-container"><video id="video" autoplay playsinline></video></div>
-    <button id="capture-btn">📷 Analyser la conformité</button>
-    <div id="status">Prêt.</div>
-    <div id="result-box">
-        <h3 id="result-title"></h3>
-        <p id="result-desc"></p>
-        <button id="btn-save">💾 Enregistrer ce contrôle</button>
-    </div>
+    <button id="capture-btn" style="padding:15px; margin-top:15px;">🔍 Comparer les deux étiquettes</button>
+    <div id="result-box"><h2 id="res-title"></h2><p id="res-desc"></p><button id="btn-save" style="display:none; padding:10px; background:#28a745; color:white; border:none;">💾 Enregistrer ce contrôle</button></div>
+    <table id="history-table"><thead><tr><th>Heure</th><th>N° Suivi (T)</th><th>Code Produit</th></tr></thead><tbody id="history-body"></tbody></table>
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
         const video = document.getElementById('video');
-        const captureBtn = document.getElementById('capture-btn');
         const btnSave = document.getElementById('btn-save');
+        let dernierScan = { t: "", code: "" };
 
         navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(s => video.srcObject = s);
 
-        captureBtn.addEventListener('click', async () => {
-            captureBtn.disabled = true;
-            document.getElementById('status').innerText = "Analyse croisée en cours...";
-            
+        document.getElementById('capture-btn').onclick = async () => {
             const canvas = document.getElementById('canvas');
             canvas.width = video.videoWidth; canvas.height = video.videoHeight;
             canvas.getContext('2d').drawImage(video, 0, 0);
 
-            const worker = await Tesseract.createWorker('eng');
-            const { data: { text } } = await worker.recognize(canvas);
-            await worker.terminate();
-
+            const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
             const txt = text.toUpperCase();
+
+            // 1. Extraction du numéro T
             const tMatch = txt.match(/T\s*?\d{7,10}/);
-            const has19 = txt.includes("19MB");
-            const has23 = txt.includes("23MB");
+            const numeroT = tMatch ? tMatch[0].replace(/\s+/g, '') : null;
 
-            let isValid = false;
-            let title = "";
-            let msg = "";
+            // 2. Extraction des codes produits
+            const matches = [...txt.matchAll(/(19MB4|19MB|23MB4|23MB)/g)];
+            const uniqueCodes = [...new Set(matches.map(m => m[0]))];
 
-            // LOGIQUE DE VALIDATION STRICTE
-            if (!tMatch) {
-                title = "❌ ÉCHEC : Étiquette T manquante";
-                msg = "Le numéro de suivi (T...) n'a pas été détecté sur l'image.";
-            } else if (has19 && has23) {
-                title = "❌ ERREUR CONFLIT";
-                msg = "Alerte : Présence simultanée de 19MB et 23MB (erreur de mélange).";
-            } else if (!has19 && !has23) {
-                title = "❌ ÉCHEC : Code produit absent";
-                msg = "Le code 19MB ou 23MB est introuvable sur la photo.";
+            const resBox = document.getElementById('result-box');
+            resBox.style.display = "block";
+
+            if (!numeroT) {
+                resBox.className = "error";
+                document.getElementById('res-title').innerText = "❌ ERREUR";
+                document.getElementById('res-desc').innerText = "Numéro de suivi (T) non détecté.";
+            } else if (uniqueCodes.length === 0) {
+                resBox.className = "error";
+                document.getElementById('res-title').innerText = "❌ ERREUR";
+                document.getElementById('res-desc').innerText = "Aucun code produit (19MB/23MB) trouvé.";
+            } else if (uniqueCodes.length > 1) {
+                resBox.className = "error";
+                document.getElementById('res-title').innerText = "❌ INCOHÉRENCE";
+                document.getElementById('res-desc').innerText = `Les deux étiquettes ne correspondent pas (${uniqueCodes.join(" / ")}).`;
             } else {
-                // Validation réussie
-                isValid = true;
-                title = `✅ CONFORME : ${tMatch[0].replace(/\s+/g,'')}`;
-                msg = `Validation réussie pour le produit : ${has23 ? "23MB4" : "19MB4"}.`;
+                resBox.className = "success";
+                document.getElementById('res-title').innerText = "✅ CONFORME";
+                document.getElementById('res-desc').innerText = `Suivi ${numeroT} confirmé avec ${uniqueCodes[0]}.`;
+                dernierScan = { t: numeroT, code: uniqueCodes[0] };
+                btnSave.style.display = "block";
             }
+        };
 
-            document.getElementById('result-title').innerText = title;
-            document.getElementById('result-desc').innerText = msg;
-            document.getElementById('result-box').className = isValid ? "success" : "error";
-            document.getElementById('result-box').style.display = "block";
-            btnSave.style.display = isValid ? "block" : "none";
-            captureBtn.disabled = false;
-        });
-
-        btnSave.onclick = () => { alert("Contrôle enregistré."); btnSave.style.display = "none"; };
+        btnSave.onclick = () => {
+            const row = document.getElementById('history-body').insertRow(0);
+            row.innerHTML = `<td>${new Date().toLocaleTimeString()}</td><td>${dernierScan.t}</td><td>${dernierScan.code}</td>`;
+            btnSave.style.display = "none";
+        };
     </script>
 </body>
 </html>
